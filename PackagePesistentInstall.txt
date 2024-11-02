@@ -1,0 +1,106 @@
+Amazon SageMaker - 수명 주기 구성 - 노트북 인스턴스
+
+GitHub Link
+https://github.com/aws-samples/amazon-sagemaker-notebook-instance-lifecycle-config-samples/tree/master/scripts/persistent-conda-ebs
+
+=== 노트북 시작 on-start.sh === Begin ===
+
+#!/bin/bash
+
+set -e
+
+# OVERVIEW
+# This script installs a custom, persistent installation of conda on the Notebook Instance's EBS volume, and ensures
+# that these custom environments are available as kernels in Jupyter.
+# 
+# The on-start script uses the custom conda environment created in the on-create script and uses the ipykernel package
+# to add that as a kernel in Jupyter.
+#
+# For another example, see:
+# https://docs.aws.amazon.com/sagemaker/latest/dg/nbi-add-external.html#nbi-isolated-environment
+
+sudo -u ec2-user -i <<'EOF'
+unset SUDO_UID
+
+WORKING_DIR=/home/ec2-user/SageMaker/custom-miniconda
+source "$WORKING_DIR/miniconda/bin/activate"
+
+for env in $WORKING_DIR/miniconda/envs/*; do
+    BASENAME=$(basename "$env")
+    source activate "$BASENAME"
+    python -m ipykernel install --user --name "$BASENAME" --display-name "Custom ($BASENAME)"
+done
+
+# Optionally, uncomment these lines to disable SageMaker-provided Conda functionality.
+# echo "c.EnvironmentKernelSpecManager.use_conda_directly = False" >> /home/ec2-user/.jupyter/jupyter_notebook_config.py
+# rm /home/ec2-user/.condarc
+EOF
+
+echo "Restarting the Jupyter server.."
+# restart command is dependent on current running Amazon Linux and JupyterLab
+CURR_VERSION=$(cat /etc/os-release)
+if [[ $CURR_VERSION == *$"http://aws.amazon.com/amazon-linux-ami/"* ]]; then
+	sudo initctl restart jupyter-server --no-wait
+else
+	sudo systemctl --no-block restart jupyter-server.service
+fi
+
+=== 노트북 시작 on-start.sh === End ===
+
+=== 노트북 생성 on-create.sh === Begin ===
+
+#!/bin/bash
+
+set -e
+
+# OVERVIEW
+# This script installs a custom, persistent installation of conda on the Notebook Instance's EBS volume, and ensures
+# that these custom environments are available as kernels in Jupyter.
+# 
+# The on-create script downloads and installs a custom conda installation to the EBS volume via Miniconda. Any relevant
+# packages can be installed here.
+#   1. ipykernel is installed to ensure that the custom environment can be used as a Jupyter kernel   
+#   2. Ensure the Notebook Instance has internet connectivity to download the Miniconda installer
+
+
+sudo -u ec2-user -i <<'EOF'
+unset SUDO_UID
+
+# Install a separate conda installation via Miniconda
+WORKING_DIR=/home/ec2-user/SageMaker/custom-miniconda
+mkdir -p "$WORKING_DIR"
+wget https://repo.anaconda.com/miniconda/Miniconda3-4.6.14-Linux-x86_64.sh -O "$WORKING_DIR/miniconda.sh"
+bash "$WORKING_DIR/miniconda.sh" -b -u -p "$WORKING_DIR/miniconda" 
+rm -rf "$WORKING_DIR/miniconda.sh"
+
+
+# Create a custom conda environment
+source "$WORKING_DIR/miniconda/bin/activate"
+KERNEL_NAME="custom_python"
+PYTHON="3.6"
+
+conda create --yes --name "$KERNEL_NAME" python="$PYTHON"
+conda activate "$KERNEL_NAME"
+
+pip install --quiet ipykernel
+
+# Customize these lines as necessary to install the required packages
+conda install --yes numpy
+pip install --quiet boto3
+
+EOF
+
+=== 노트북 생성 on-create.sh === End ===
+
+위 사항 구성 후 
+
+노트북 실행시 kernel을 custom_python을 선택 후 
+
+conda install
+pip install
+
+로 패키지 설치하게 되면 노트북 인스턴스의 로컬 커널의 
+
+home/ec2-user/SageMaker/custom-miniconda/miniconda/pkgs/ 
+
+폴더에 패키지가 설치 됨.
